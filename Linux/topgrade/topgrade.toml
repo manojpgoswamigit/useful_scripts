@@ -1,0 +1,100 @@
+[include]
+
+[misc]
+pre_sudo = true
+disable = [
+    "firmware",
+    "snap",
+    "chezmoi",
+]
+first = []
+last = [
+    "flatpak",
+]
+ignore_failures = [
+    "pip3",
+    "antigravity",
+]
+cleanup = true
+notify_end = "on_failure"
+ssh_arguments = "-o ConnectTimeout=2"
+
+[pre_commands]
+# "Backup dotfiles" = "chezmoi git -- push"
+
+[post_commands]
+"Reload shell" = "exec $SHELL"
+
+[commands]
+# "Update Python env" = "~/dev/.venv/bin/pip install -U pip"
+
+[python]
+enable_pip_review = true
+
+[conda]
+
+[composer]
+
+[brew]
+
+[linux]
+arch_package_manager = "paru"
+yay_arguments = "--nodevel"
+
+[mandb]
+
+[pkgfile]
+
+[git]
+repos = [
+  # "~/dotfiles",
+  "~/src/*/",
+]
+max_concurrency = 5
+arguments = "--rebase --autostash"
+
+[windows]
+
+[chezmoi]
+
+[mise]
+
+[go]
+
+[npm]
+
+[yarn]
+
+[deno]
+
+[viteplus]
+
+[vim]
+
+[firmware]
+upgrade = false
+
+[vagrant]
+
+[flatpak]
+use_sudo = true
+
+[distrobox]
+
+[containers]
+
+[lensfun]
+
+[julia]
+
+[zigup]
+
+[vscode]
+
+[pixi]
+
+[doom]
+
+[cargo]
+
+[rustup]
