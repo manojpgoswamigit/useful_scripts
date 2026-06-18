@@ -102,9 +102,13 @@ if [ ! -f "$SPICETIFY_CONFIG_FILE" ]; then
     spicetify bootstrap || true
 fi
 
-# 9. Configure paths in Spicetify config-xpui.ini
+# 9. Configure paths and options in Spicetify config-xpui.ini
 echo -e "${YELLOW}Configuring Spicetify path to /opt/spotify...${NC}"
 spicetify config spotify_path "/opt/spotify"
+
+# Set Wayland launch flags so Spicetify launches Spotify correctly
+echo -e "${YELLOW}Configuring Spicetify launch flags for Wayland compatibility...${NC}"
+spicetify config spotify_launch_flags "--enable-features=UseOzonePlatform|--ozone-platform=wayland|--enable-features=WaylandWindowDecorations"
 
 # Set correct prefs path if needed
 PREFS_PATH="$HOME/.config/spotify/prefs"
@@ -123,7 +127,30 @@ echo -e "${GREEN}[✓] Adblockify downloaded successfully.${NC}"
 # Enable extension in Spicetify
 spicetify config extensions adblock.js
 
-# 11. Apply Spicetify Patch
+# 11. Fix Spotify blurriness on Wayland (HiDPI scaling)
+echo -e "${YELLOW}Configuring Spotify launch flags to fix blurriness on Wayland...${NC}"
+
+# Write flags to ~/.config/spotify-flags.conf (used by /usr/bin/spotify wrapper)
+SPOTIFY_FLAGS_FILE="$HOME/.config/spotify-flags.conf"
+mkdir -p "$HOME/.config"
+cat <<EOF > "$SPOTIFY_FLAGS_FILE"
+--enable-features=UseOzonePlatform
+--ozone-platform=wayland
+--enable-features=WaylandWindowDecorations
+EOF
+echo -e "${GREEN}[✓] Spotify user flags configured at $SPOTIFY_FLAGS_FILE.${NC}"
+
+# Clean up any local spotify.desktop to avoid redundant files overriding system configuration
+LOCAL_DESKTOP_FILE="$HOME/.local/share/applications/spotify.desktop"
+if [ -f "$LOCAL_DESKTOP_FILE" ]; then
+    rm "$LOCAL_DESKTOP_FILE"
+    if command -v update-desktop-database &> /dev/null; then
+        update-desktop-database "$HOME/.local/share/applications"
+    fi
+    echo -e "${GREEN}[✓] Cleaned up legacy local desktop file override.${NC}"
+fi
+
+# 12. Apply Spicetify Patch
 # Kill any running Spotify instance to make sure files aren't locked and modifications apply immediately
 if pgrep -i "spotify" > /dev/null; then
     echo -e "${YELLOW}Closing running Spotify instance(s) to apply the patch...${NC}"
@@ -134,7 +161,7 @@ fi
 echo -e "${YELLOW}Applying Spicetify customizations (this may take a few seconds)...${NC}"
 if spicetify restore backup apply; then
     echo -e "${GREEN}=== Setup Completed Successfully! ===${NC}"
-    echo -e "Spotify is now patched with Adblockify."
+    echo -e "Spotify is now patched with Adblockify and configured for Wayland display compatibility."
     echo -e "Updates have been pinned in pacman to keep the patch stable."
 else
     # Fallback to standard apply if backup setup encountered issues
@@ -146,3 +173,14 @@ else
         exit 1
     fi
 fi
+
+# 13. Relaunch Spotify to apply Wayland display fixes (avoiding the blurry auto-launch)
+if pgrep -i "spotify" > /dev/null; then
+    echo -e "${YELLOW}Restarting Spotify to apply display fixes...${NC}"
+    pkill -i "spotify" || true
+    sleep 1.5
+fi
+# Launch Spotify in the background and disown it
+spotify >/dev/null 2>&1 & disown
+echo -e "${GREEN}[✓] Spotify restarted successfully (non-blurry).${NC}"
+
