@@ -7,7 +7,6 @@ disable = [
     "snap",
     "chezmoi",
 ]
-first = []
 last = [
     "flatpak",
 ]
@@ -23,7 +22,7 @@ ssh_arguments = "-o ConnectTimeout=2"
 # "Backup dotfiles" = "chezmoi git -- push"
 
 [post_commands]
-"Reload shell" = "exec $SHELL"
+# "Reload shell" = "exec $SHELL"  # no-op: runs in a subprocess, doesn't affect your interactive shell
 
 [commands]
 # "Update Python env" = "~/dev/.venv/bin/pip install -U pip"
@@ -31,70 +30,29 @@ ssh_arguments = "-o ConnectTimeout=2"
 [python]
 enable_pip_review = true
 
-[conda]
-
-[composer]
-
-[brew]
-
 [linux]
 arch_package_manager = "paru"
 yay_arguments = "--nodevel"
 
-[mandb]
-
-[pkgfile]
-
 [git]
 repos = [
   # "~/dotfiles",
-  "~/src/*/",
+  # "~/src/*/",  # uncomment when you have git repos here
 ]
 max_concurrency = 5
 arguments = "--rebase --autostash"
 
-[windows]
-
-[chezmoi]
-
-[mise]
-
-[go]
-
-[npm]
-
-[yarn]
-
-[deno]
-
-[viteplus]
-
-[vim]
-
 [firmware]
 upgrade = false
-
-[vagrant]
 
 [flatpak]
 use_sudo = true
 
-[distrobox]
-
-[containers]
-
-[lensfun]
-
-[julia]
-
-[zigup]
-
 [vscode]
-
-[pixi]
-
-[doom]
 
 [cargo]
 
 [rustup]
+
+[containers]
+#ignored_containers = ["odysseus-odysseus"]

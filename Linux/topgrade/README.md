@@ -31,3 +31,17 @@ cp /home/mpi/Documents/GitHub/useful_scripts/Linux/topgrade/topgrade.toml ~/.con
 - **Disabled Upgraders**: Firmware, Snap, and Chezmoi are disabled to avoid conflicts/redundancies.
 - **Ignored Failures**: Ignores failures in `pip3` and `antigravity` to prevent halting the entire update cycle.
 - **Post-commands**: Configured to reload the shell after completion.
+
+## Custom System Upgrade Script (`upgrade.sh`)
+
+We created a custom wrapper script (`upgrade.sh`) that runs `topgrade` first to update all application runtimes and repositories, and then runs CachyOS-specific cleanups and checks:
+
+- **Orphans**: Scans for and removes orphan packages and their dependencies.
+- **Flatpak Cleanup**: Uninstalls unused Flatpak packages and runtimes.
+- **Package Cache**: Cleans up older versions of cached package archives using `paccache` (retains the 3 latest versions, removes uninstalled packages).
+- **Kernel Update Reboot Check**: Detects if a kernel upgrade has occurred by verifying if modules match the running system, prompting the user for a reboot if required.
+
+### How to Run:
+```bash
+/home/mpi/Documents/GitHub/useful_scripts/Linux/topgrade/upgrade.sh
+```
