@@ -118,7 +118,11 @@ else
             fi
             
             # 3. Regenerate Initramfs
-            if command -v mkinitcpio &>/dev/null; then
+            if command -v limine-mkinitcpio &>/dev/null; then
+                echo -e "${YELLOW}Regenerating initramfs with limine-mkinitcpio...${NC}"
+                sudo limine-mkinitcpio
+                echo -e "${GREEN}[✓] Initramfs regenerated successfully.${NC}"
+            elif command -v mkinitcpio &>/dev/null; then
                 echo -e "${YELLOW}Regenerating initramfs with mkinitcpio...${NC}"
                 sudo mkinitcpio -P
                 echo -e "${GREEN}[✓] Initramfs regenerated successfully.${NC}"
@@ -127,12 +131,58 @@ else
                 sudo dracut-rebuild
                 echo -e "${GREEN}[✓] Initramfs regenerated successfully.${NC}"
             else
-                echo -e "${YELLOW}[!] Warning: No supported initramfs generator (mkinitcpio or dracut) found.${NC}"
+                echo -e "${YELLOW}[!] Warning: No supported initramfs generator (limine-mkinitcpio, mkinitcpio, or dracut) found.${NC}"
                 echo -e "    Please regenerate your initramfs manually to apply modifications."
             fi
             
             REBOOT_REQUIRED=true
             echo -e "${GREEN}[✓] NVIDIA DRM Modesetting configured!${NC}"
+            ;;
+    esac
+fi
+
+# 1.5. Configure NVIDIA PowerMizer performance settings to avoid stuttering under Wayland
+echo -e "\n${CYAN}[1.5/6] Checking NVIDIA PowerMizer Settings...${NC}"
+MODPROBE_CONF="/etc/modprobe.d/nvidia.conf"
+
+if [ -f "$MODPROBE_CONF" ] && grep -q "NVreg_RegistryDwords" "$MODPROBE_CONF" && grep -q "PowerMizerEnable=0x1" "$MODPROBE_CONF"; then
+    echo -e "${GREEN}[✓] NVIDIA PowerMizer performance RegistryDwords already configured.${NC}"
+else
+    echo -e "${YELLOW}[!] Warning: NVIDIA PowerMizer RegistryDwords are not set or incomplete.${NC}"
+    echo -e "    Without forcing maximum performance, the driver may stay in the lowest power"
+    echo -e "    saving state (P8 / 315MHz) during video playback, bottlenecking memory and"
+    echo -e "    PCIe bandwidth, which causes micro-stuttering."
+    read -r -p "Would you like to configure NVIDIA PowerMizer for maximum performance? [Y/n] " pm_yn
+    case $pm_yn in
+        [Nn]*)
+            echo -e "${YELLOW}Skipping PowerMizer override. Micro-stuttering may persist during video playback.${NC}"
+            ;;
+        *)
+            echo -e "${YELLOW}Applying PowerMizer performance overrides...${NC}"
+            sudo mkdir -p /etc/modprobe.d
+            if [ -f "$MODPROBE_CONF" ] && grep -q "options nvidia " "$MODPROBE_CONF"; then
+                if grep -q "NVreg_RegistryDwords" "$MODPROBE_CONF"; then
+                    sudo sed -i 's/options nvidia .*NVreg_RegistryDwords=.*/options nvidia NVreg_EnableGpuFirmware=0 NVreg_RegistryDwords="PowerMizerEnable=0x1; PerfLevelSrc=0x2222; PowerMizerDefaultAC=0x1"/' "$MODPROBE_CONF"
+                else
+                    sudo sed -i 's/options nvidia .*/& NVreg_RegistryDwords="PowerMizerEnable=0x1; PerfLevelSrc=0x2222; PowerMizerDefaultAC=0x1"/' "$MODPROBE_CONF"
+                fi
+            else
+                echo 'options nvidia NVreg_EnableGpuFirmware=0 NVreg_RegistryDwords="PowerMizerEnable=0x1; PerfLevelSrc=0x2222; PowerMizerDefaultAC=0x1"' | sudo tee -a "$MODPROBE_CONF" >/dev/null
+            fi
+            echo -e "${GREEN}[✓] Overrides written to $MODPROBE_CONF.${NC}"
+            
+            if command -v limine-mkinitcpio &>/dev/null; then
+                echo -e "${YELLOW}Regenerating initramfs with limine-mkinitcpio...${NC}"
+                sudo limine-mkinitcpio
+            elif command -v mkinitcpio &>/dev/null; then
+                echo -e "${YELLOW}Regenerating initramfs with mkinitcpio...${NC}"
+                sudo mkinitcpio -P
+            elif command -v dracut &>/dev/null; then
+                echo -e "${YELLOW}Regenerating initramfs with dracut...${NC}"
+                sudo dracut-rebuild
+            fi
+            REBOOT_REQUIRED=true
+            echo -e "${GREEN}[✓] Overrides applied. A system reboot is required to load the new settings.${NC}"
             ;;
     esac
 fi
@@ -319,6 +369,8 @@ for dir in "${DESKTOP_DIRS[@]}"; do
             -e 's|/opt/brave-origin-bin/brave-origin|/usr/bin/brave-origin|g' \
             -e 's|/opt/brave-origin-bin/brave|/usr/bin/brave-origin|g' \
             -e 's|/opt/brave-bin/brave|/usr/bin/brave|g' \
+            -e 's|/opt/brave.com/brave-origin-beta/brave-origin-beta|/usr/bin/brave-origin-beta|g' \
+            -e 's|/opt/brave.com/brave-origin-beta/brave|/usr/bin/brave-origin-beta|g' \
             -e 's|/opt/google/chrome/google-chrome|/usr/bin/google-chrome|g' \
             -e 's|/opt/google/chrome/chrome|/usr/bin/google-chrome|g' \
             -e 's|/opt/google/chrome-beta/google-chrome-beta|/usr/bin/google-chrome-beta|g' \
@@ -353,6 +405,46 @@ if [ -n "$RUNNING_BROWSERS" ]; then
             echo -e "${GREEN}[✓] Browser processes terminated.${NC}"
             ;;
     esac
+fi
+
+# 6.6. Verify KDE Plasma Session Restore Settings
+KSMSERVER_RC="$HOME/.config/ksmserverrc"
+if [ -f "$KSMSERVER_RC" ]; then
+    # If [General] is not present or loginMode is set to restorePreviousLogout, warn the user
+    # because session restore bypasses wrapper scripts and causes flagless browser restarts.
+    LOGIN_MODE="restorePreviousLogout" # default
+    if grep -q "loginMode=" "$KSMSERVER_RC"; then
+        LOGIN_MODE=$(grep "loginMode=" "$KSMSERVER_RC" | cut -d'=' -f2)
+    fi
+    
+    if [ "$LOGIN_MODE" = "restorePreviousLogout" ]; then
+        echo -e "\n${YELLOW}[!] Warning: KDE Desktop Session Restore is active.${NC}"
+        echo -e "    On reboot, KDE will automatically restore your running apps by calling"
+        echo -e "    the raw browser binary directly, bypassing all flags and configurations."
+        read -r -p "Would you like to switch KDE to start with an empty session instead? [Y/n] " kde_yn
+        case $kde_yn in
+            [Nn]*)
+                echo -e "${YELLOW}Please remember to manually close and reopen Brave if it stutters after rebooting.${NC}"
+                ;;
+            *)
+                echo -e "${YELLOW}Configuring KDE to start with an empty session...${NC}"
+                if grep -q "\[General\]" "$KSMSERVER_RC"; then
+                    if grep -q "loginMode=" "$KSMSERVER_RC"; then
+                        sed -i 's/loginMode=.*/loginMode=default/' "$KSMSERVER_RC"
+                    else
+                        sed -i '/\[General\]/a loginMode=default' "$KSMSERVER_RC"
+                    fi
+                else
+                    cat <<EOF >> "$KSMSERVER_RC"
+
+[General]
+loginMode=default
+EOF
+                fi
+                echo -e "${GREEN}[✓] KDE Session Restore set to start with empty session.${NC}"
+                ;;
+        esac
+    fi
 fi
 
 # 7. Verification Steps
