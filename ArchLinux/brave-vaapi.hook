@@ -1,0 +1,18 @@
+[Trigger]
+Type = Package
+Operation = Install
+Operation = Upgrade
+Target = brave-bin
+Target = brave-origin-bin
+Target = google-chrome
+Target = google-chrome-beta
+Target = google-chrome-unstable
+Target = microsoft-edge-stable-bin
+Target = microsoft-edge-beta-bin
+Target = microsoft-edge-dev-bin
+Target = chromium
+
+[Action]
+Description = Re-applying NVIDIA VA-API configuration for browsers...
+When = PostTransaction
+Exec = /usr/bin/sudo -u mpi HOME=/home/mpi /home/mpi/Documents/GitHub/useful_scripts/ArchLinux/brave_nvidia_vaapi_setup/install.sh

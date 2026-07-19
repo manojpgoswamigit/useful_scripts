@@ -1,0 +1,11 @@
+[Trigger]
+Type = Package
+Operation = Install
+Operation = Upgrade
+Target = spotify
+Target = spicetify-cli
+
+[Action]
+Description = Re-applying Spicetify patches on Spotify/Spicetify update...
+When = PostTransaction
+Exec = /usr/bin/bash -c 'chmod a+wr /opt/spotify && chmod a+wr /opt/spotify/Apps -R && sudo -u mpi HOME=/home/mpi /home/mpi/Documents/GitHub/useful_scripts/ArchLinux/spicetify_spotify_setup/install.sh'

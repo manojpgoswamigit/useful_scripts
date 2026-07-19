@@ -45,9 +45,22 @@ if [ -n "$DISPLAY" ] || [ -n "$WAYLAND_DISPLAY" ]; then
     fi
 fi
 
-# Request sudo credentials cache upfront
-echo -e "${YELLOW}Requesting sudo authorization for system operations...${NC}"
-$SUDO_CMD true
+# Check if sudo is actually needed
+NEED_SUDO=false
+if ! pacman-conf IgnorePkg | grep -qw "spotify"; then
+    NEED_SUDO=true
+fi
+if [ ! -w /opt/spotify ] || [ ! -w /opt/spotify/Apps ]; then
+    NEED_SUDO=true
+fi
+
+# Request sudo credentials cache upfront if needed
+if [ "$NEED_SUDO" = true ]; then
+    echo -e "${YELLOW}Requesting sudo authorization for system operations...${NC}"
+    $SUDO_CMD true
+else
+    echo -e "${GREEN}[✓] Sudo permissions not required (already set).${NC}"
+fi
 
 # 4. Install Spotify AUR package
 if pacman -Q spotify &> /dev/null; then
@@ -88,10 +101,14 @@ add_to_ignorepkg() {
 add_to_ignorepkg
 
 # 7. Grant folder permissions on Spotify
-echo -e "${YELLOW}Granting write permissions to Spotify installation folders for Spicetify...${NC}"
-$SUDO_CMD chmod a+wr /opt/spotify
-$SUDO_CMD chmod a+wr /opt/spotify/Apps -R
-echo -e "${GREEN}[✓] Folder permissions granted.${NC}"
+if [ -w /opt/spotify ] && [ -w /opt/spotify/Apps ]; then
+    echo -e "${GREEN}[✓] Folder write permissions already granted.${NC}"
+else
+    echo -e "${YELLOW}Granting write permissions to Spotify installation folders for Spicetify...${NC}"
+    $SUDO_CMD chmod a+wr /opt/spotify
+    $SUDO_CMD chmod a+wr /opt/spotify/Apps -R
+    echo -e "${GREEN}[✓] Folder permissions granted.${NC}"
+fi
 
 # 8. Initialize Spicetify config if it doesn't exist
 SPICETIFY_CONFIG_DIR="$HOME/.config/spicetify"

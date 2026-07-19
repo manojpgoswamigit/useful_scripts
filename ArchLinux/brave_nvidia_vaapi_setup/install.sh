@@ -83,7 +83,10 @@ else
     echo -e "${YELLOW}[!] WARNING: NVIDIA DRM Modesetting is NOT enabled.${NC}"
     echo -e "    VA-API hardware acceleration and HDR requires modesetting to be active."
     
-    read -r -p "Would you like to automatically configure it now? [Y/n] " yn
+    yn="y"
+    if [ -t 0 ] && [ "${NON_INTERACTIVE:-0}" != "1" ]; then
+        read -r -p "Would you like to automatically configure it now? [Y/n] " yn
+    fi
     case $yn in
         [Nn]*)
             echo -e "${RED}Skipping modesetting configuration. Hardware acceleration will likely be disabled until rebooted with modeset enabled.${NC}"
@@ -152,7 +155,10 @@ else
     echo -e "    Without forcing maximum performance, the driver may stay in the lowest power"
     echo -e "    saving state (P8 / 315MHz) during video playback, bottlenecking memory and"
     echo -e "    PCIe bandwidth, which causes micro-stuttering."
-    read -r -p "Would you like to configure NVIDIA PowerMizer for maximum performance? [Y/n] " pm_yn
+    pm_yn="y"
+    if [ -t 0 ] && [ "${NON_INTERACTIVE:-0}" != "1" ]; then
+        read -r -p "Would you like to configure NVIDIA PowerMizer for maximum performance? [Y/n] " pm_yn
+    fi
     case $pm_yn in
         [Nn]*)
             echo -e "${YELLOW}Skipping PowerMizer override. Micro-stuttering may persist during video playback.${NC}"
@@ -218,7 +224,10 @@ install_package() {
         echo -e "${GREEN}[✓] $pkg ($desc) is already installed.${NC}"
     else
         echo -e "${YELLOW}[!] $pkg ($desc) is missing.${NC}"
-        read -r -p "Would you like to install it now? [Y/n] " yn
+        yn="y"
+        if [ -t 0 ] && [ "${NON_INTERACTIVE:-0}" != "1" ]; then
+            read -r -p "Would you like to install it now? [Y/n] " yn
+        fi
         case $yn in
             [Nn]*)
                 echo -e "${RED}Aborting. Setup cannot continue without $pkg.${NC}"
@@ -391,7 +400,10 @@ if [ -n "$RUNNING_BROWSERS" ]; then
     echo -e "\n${YELLOW}[!] Detected active browser processes running in the background.${NC}"
     echo -e "    Since existing browser processes were launched without flags (e.g., autostarted PWAs),"
     echo -e "    you must close them for the hardware video acceleration config to take effect."
-    read -r -p "Would you like to close all running Chrome/Brave browser processes now? [Y/n] " kill_yn
+    kill_yn="n"
+    if [ -t 0 ] && [ "${NON_INTERACTIVE:-0}" != "1" ]; then
+        read -r -p "Would you like to close all running Chrome/Brave browser processes now? [Y/n] " kill_yn
+    fi
     case $kill_yn in
         [Nn]*)
             echo -e "${YELLOW}Please manually close/kill all browser instances before testing.${NC}"
@@ -421,7 +433,10 @@ if [ -f "$KSMSERVER_RC" ]; then
         echo -e "\n${YELLOW}[!] Warning: KDE Desktop Session Restore is active.${NC}"
         echo -e "    On reboot, KDE will automatically restore your running apps by calling"
         echo -e "    the raw browser binary directly, bypassing all flags and configurations."
-        read -r -p "Would you like to switch KDE to start with an empty session instead? [Y/n] " kde_yn
+        kde_yn="y"
+        if [ -t 0 ] && [ "${NON_INTERACTIVE:-0}" != "1" ]; then
+            read -r -p "Would you like to switch KDE to start with an empty session instead? [Y/n] " kde_yn
+        fi
         case $kde_yn in
             [Nn]*)
                 echo -e "${YELLOW}Please remember to manually close and reopen Brave if it stutters after rebooting.${NC}"
