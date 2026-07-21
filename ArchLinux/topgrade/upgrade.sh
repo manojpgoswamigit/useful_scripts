@@ -35,7 +35,7 @@ echo
 
 # 1. Run Topgrade
 echo -e "${CYAN}${BOLD}==> Phase 1: Running Topgrade upgrades...${NC}"
-if topgrade; then
+if topgrade "$@"; then
     echo -e "${GREEN}[✓] Topgrade upgrades completed successfully.${NC}"
 else
     echo -e "${RED}Warning: Topgrade reported some errors or was interrupted.${NC}"

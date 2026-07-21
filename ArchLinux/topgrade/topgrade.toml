@@ -22,7 +22,8 @@ ssh_arguments = "-o ConnectTimeout=2"
 # "Backup dotfiles" = "chezmoi git -- push"
 
 [post_commands]
-# "Reload shell" = "exec $SHELL"  # no-op: runs in a subprocess, doesn't affect your interactive shell
+"Patch Browsers (NVIDIA VA-API & Launchers)" = "/home/mpi/Documents/GitHub/useful_scripts/ArchLinux/brave_nvidia_vaapi_setup/install.sh"
+"Apply Spicetify (Spotify Theme & Adblock)" = "/home/mpi/Documents/GitHub/useful_scripts/ArchLinux/spicetify_spotify_setup/install.sh"
 
 [commands]
 # "Update Python env" = "~/dev/.venv/bin/pip install -U pip"
