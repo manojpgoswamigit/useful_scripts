@@ -328,13 +328,14 @@ CONFIGURED_ANY=false
 
 # The direct, optimal acceleration and HDR playback flags
 ACCEL_FLAGS=$(cat <<'EOF'
---ozone-platform-hint=auto
+--ozone-platform-hint=wayland
 --ignore-gpu-blocklist
 --enable-gpu-rasterization
 --enable-zero-copy
---use-gl=egl
+--use-gl=angle
+--use-angle=gl
 --enable-features=VaapiVideoDecoder,VaapiOnNvidiaGPUs,VaapiIgnoreDriverChecks,UseHDRTransferFunction,UseSkiaRenderer,WaylandFractionalScaleV1,AcceleratedVideoDecodeLinuxGL,AcceleratedVideoDecodeLinuxZeroCopyGL
---disable-features=UseChromeOSDirectVideoDecoder
+--disable-features=UseChromeOSDirectVideoDecoder,Vulkan
 EOF
 )
 
