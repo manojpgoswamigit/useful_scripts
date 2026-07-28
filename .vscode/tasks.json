@@ -1,0 +1,43 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Open URL in Firefox",
+      "type": "shell",
+      "command": "/usr/bin/firefox ${input:url}",
+      "problemMatcher": []
+    },
+    {
+      "label": "Open URL in Google Chrome",
+      "type": "shell",
+      "command": "/usr/bin/google-chrome-stable ${input:url}",
+      "problemMatcher": []
+    },
+    {
+      "label": "Open URL in Helium Browser",
+      "type": "shell",
+      "command": "/usr/bin/helium-browser ${input:url}",
+      "problemMatcher": []
+    },
+    {
+      "label": "Open URL in Microsoft Edge",
+      "type": "shell",
+      "command": "/usr/bin/microsoft-edge-stable ${input:url}",
+      "problemMatcher": []
+    },
+    {
+      "label": "Open URL in Brave",
+      "type": "shell",
+      "command": "/usr/bin/brave-origin ${input:url}",
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "url",
+      "type": "promptString",
+      "description": "URL to open in Firefox",
+      "default": "https://test.salesforce.com"
+    }
+  ]
+}

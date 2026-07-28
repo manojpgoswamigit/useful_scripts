@@ -1,0 +1,9 @@
+{
+  "terminal.integrated.env.linux": {
+    "PATH": "${env:HOME}/.local/share/antigravity-wrappers/brave:${env:PATH}",
+    "BROWSER": "/usr/bin/brave-origin"
+  },
+  "salesforcedx-vscode-core.preferredBrowser": "chrome",
+  "openInBrowser.default": "/usr/bin/brave-origin",
+  "workbench.externalBrowser": "/usr/bin/brave-origin"
+}
