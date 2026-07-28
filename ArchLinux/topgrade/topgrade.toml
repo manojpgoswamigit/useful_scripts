@@ -33,7 +33,7 @@ enable_pip_review = true
 
 [linux]
 arch_package_manager = "paru"
-yay_arguments = "--nodevel"
+yay_arguments = "--nodevel --ignore llama.cpp-cuda"
 
 [git]
 repos = [
