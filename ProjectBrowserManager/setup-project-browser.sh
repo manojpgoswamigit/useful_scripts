@@ -4,7 +4,8 @@
 #
 # Interactive per-project preferred web browser manager for Antigravity / VS Code.
 # Redirects CLI & extension link opens (sf, xdg-open, gio, kde-open) per workspace
-# without altering OS-level default browser settings.
+# and per Microsoft Teams application instance without altering OS default browser.
+# Preserves all pre-existing VS Code configuration and JSONC comments.
 # ==============================================================================
 
 # Detect if script is being sourced in current shell
@@ -57,264 +58,106 @@ show_help() {
   echo ""
   echo -e "${BOLD}COMMANDS / OPTIONS:${NC}"
   echo -e "  ${GREEN}[browser_name]${NC}  Configures project (e.g. firefox, chrome, brave, edge, helium, vivaldi, zen)"
-  echo -e "  ${GREEN}--status, -s${NC}    Displays current workspace browser configuration & PATH status"
+  echo -e "  ${GREEN}--teams, -tm${NC}    Configures default web browser rules per Microsoft Teams instance"
+  echo -e "  ${GREEN}--rename-teams${NC}  Customizes taskbar hover names, tooltips, & icons per Teams app"
+  echo -e "  ${GREEN}--status, -s${NC}    Displays current workspace browser & MS Teams application routing rules"
   echo -e "  ${GREEN}--test, -t${NC}      Tests opening a link with the configured project browser"
   echo -e "  ${GREEN}--reset, -r${NC}     Removes project browser configuration from .vscode/settings.json"
   echo -e "  ${GREEN}--help, -h${NC}      Displays this help menu"
   echo ""
   echo -e "${BOLD}EXAMPLES:${NC}"
-  echo "  ./setup-project-browser.sh                # Interactive menu selection (Auto-scans PC)"
-  echo "  ./setup-project-browser.sh firefox        # Quick-set to Firefox"
-  echo "  ./setup-project-browser.sh helium         # Quick-set to Helium Browser"
+  echo "  ./setup-project-browser.sh                # Interactive menu selection (Auto-scans PC & Teams)"
+  echo "  ./setup-project-browser.sh --teams        # Configure default web browser per MS Teams app"
+  echo "  ./setup-project-browser.sh firefox        # Quick-set workspace to Firefox"
+  echo "  ./setup-project-browser.sh brave          # Quick-set workspace to Brave Browser"
   echo "  source ./setup-project-browser.sh chrome  # Quick-set & activate in current shell"
   echo "  source .vscode/env.sh                     # Activate existing project browser in current shell"
   echo "  ./setup-project-browser.sh --test         # Test launch link in configured browser"
-  echo "  ./setup-project-browser.sh --status       # Check workspace configuration status"
+  echo "  ./setup-project-browser.sh --status       # Check workspace configuration & Teams status"
   echo ""
 }
 
-# Register system-wide XDG URL handler for Electron/VS Code openExternal calls
-install_desktop_url_handler() {
-  mkdir -p "$HOME/.local/bin" "$HOME/.local/share/applications"
+# Scan system for installed Microsoft Teams applications (Native, Flatpak, PWAs, Snaps)
+scan_teams_apps() {
+  python3 -c "
+import os, glob, re, json
 
-  cat << 'SMART_EOF' > "$HOME/.local/bin/antigravity-smart-open"
-#!/bin/bash
-URL="$1"
+desktop_dirs = [
+    os.path.expanduser('~/.local/share/applications'),
+    '/usr/share/applications',
+    os.path.expanduser('~/.local/share/flatpak/exports/share/applications'),
+    '/var/lib/flatpak/exports/share/applications',
+    '/var/lib/snapd/desktop/applications'
+]
 
-PROJECT_BROWSER_BIN=$(python3 -c "
-import os, json
+override_map = {}
+for base in desktop_dirs:
+    if not os.path.isdir(base): continue
+    for fname in os.listdir(base):
+        if fname.endswith('.desktop'):
+            full_path = os.path.join(base, fname)
+            if fname not in override_map:
+                override_map[fname] = full_path
 
-def find_bin():
-    ws_file = os.path.expanduser('~/.config/antigravity-project-browser/active-workspace.json')
-    if os.path.isfile(ws_file):
-        try:
-            with open(ws_file) as f:
-                ws_dir = json.load(f).get('workspace_dir', '')
-            if ws_dir and os.path.isdir(ws_dir):
-                p = os.path.join(ws_dir, '.vscode', 'settings.json')
-                if os.path.isfile(p):
-                    with open(p) as f:
-                        d = json.load(f)
-                    b = d.get('terminal.integrated.env.linux', {}).get('BROWSER') or d.get('workbench.externalBrowser') or d.get('openInBrowser.default') or ''
-                    if b: return b
-        except Exception: pass
-    return ''
+seen_keys = set()
+teams_apps = []
 
-print(find_bin())
-" 2>/dev/null || true)
+for fname, dt in override_map.items():
+    if 'antigravity-browser-opener' in dt: continue
+    try:
+        with open(dt, 'r', errors='ignore') as f:
+            content = f.read()
+        
+        if 'steam' in fname.lower() or 'teamviewer' in fname.lower():
+            continue
+            
+        name_m = re.search(r'^Name=(.+)$', content, re.MULTILINE)
+        exec_m = re.search(r'^Exec=(.+)$', content, re.MULTILINE)
+        comment_m = re.search(r'^Comment=(.+)$', content, re.MULTILINE)
 
-if [ -n "$PROJECT_BROWSER_BIN" ] && command -v "$PROJECT_BROWSER_BIN" >/dev/null 2>&1; then
-  exec "$PROJECT_BROWSER_BIN" "$URL"
-else
-  FALLBACK=$(which brave-origin brave google-chrome-stable firefox 2>/dev/null | head -n 1)
-  if [ -n "$FALLBACK" ]; then
-    exec "$FALLBACK" "$URL"
-  else
-    exec /usr/bin/xdg-open "$URL"
-  fi
-fi
-SMART_EOF
-  chmod +x "$HOME/.local/bin/antigravity-smart-open"
+        name = name_m.group(1).strip() if name_m else fname
+        exec_cmd = exec_m.group(1).strip() if exec_m else ''
+        comment = comment_m.group(1).strip() if comment_m else ''
+        
+        is_teams = False
+        if any(k in fname.lower() for k in ['teams', 'msteams', 'ms-teams']):
+            is_teams = True
+        elif any(k in name.lower() for k in ['microsoft teams', 'teams for linux', 'g teams', 'msteams', 'ms teams']):
+            is_teams = True
+        elif 'teams.microsoft.com' in exec_cmd.lower() or 'teams.live.com' in exec_cmd.lower():
+            is_teams = True
+        elif 'teams' in comment.lower() and ('microsoft' in comment.lower() or 'chat' in comment.lower()):
+            is_teams = True
 
-  cat << 'DESKTOP_EOF' > "$HOME/.local/share/applications/antigravity-browser-opener.desktop"
-[Desktop Entry]
-Version=1.0
-Type=Application
-Name=Antigravity Smart Browser Router
-Comment=Per-project browser router for Antigravity & VS Code
-Exec=/home/mpi/.local/bin/antigravity-smart-open %u
-Icon=internet-web-browser
-Terminal=false
-Categories=Network;WebBrowser;
-MimeType=x-scheme-handler/http;x-scheme-handler/https;text/html;
-DESKTOP_EOF
+        if is_teams:
+            app_id = fname.replace('.desktop', '')
+            if 'flatpak' in exec_cmd:
+                fp_match = re.search(r'([a-zA-Z0-9_\-\.]+\.teams[a-zA-Z0-9_\-\.]*)', exec_cmd, re.I)
+                if fp_match:
+                    app_id = f'flatpak:{fp_match.group(1)}'
+                else:
+                    fp_match2 = re.search(r'([a-zA-Z0-9_\-\.]+\.[a-zA-Z0-9_\-\.]+)', exec_cmd)
+                    if fp_match2:
+                        app_id = f'flatpak:{fp_match2.group(1)}'
+            elif '--app-id=' in exec_cmd:
+                pwa_id = re.search(r'--app-id=([a-zA-Z0-9]+)', exec_cmd)
+                if pwa_id:
+                    app_id = f'pwa:{pwa_id.group(1)}'
+            
+            key = (name, app_id, exec_cmd)
+            if key not in seen_keys:
+                seen_keys.add(key)
+                teams_apps.append({
+                    'id': app_id,
+                    'name': name,
+                    'exec': exec_cmd,
+                    'desktop_file': dt
+                })
+    except Exception:
+        pass
 
-  xdg-mime default antigravity-browser-opener.desktop x-scheme-handler/http 2>/dev/null || true
-  xdg-mime default antigravity-browser-opener.desktop x-scheme-handler/https 2>/dev/null || true
-}
-
-# Install global smart wrappers into Antigravity IDE bin and ~/.local/bin to intercept IDE extension processes
-install_global_smart_wrappers() {
-  local target_dirs=("$HOME/.gemini/antigravity-ide/bin" "$HOME/.local/bin")
-  for target_dir in "${target_dirs[@]}"; do
-    mkdir -p "$target_dir"
-
-    # 1. Global Smart sf wrapper
-    cat << 'GLOBAL_SF_EOF' > "$target_dir/sf"
-#!/bin/bash
-REAL_SF=$(which -a sf 2>/dev/null | grep -v "antigravity-ide/bin/sf" | grep -v ".local/bin/sf" | grep -v "antigravity-wrappers" | head -n 1)
-if [ -z "$REAL_SF" ] && [ -f "$HOME/.nvm/versions/node/v24.16.0/bin/sf" ]; then
-  REAL_SF="$HOME/.nvm/versions/node/v24.16.0/bin/sf"
-elif [ -z "$REAL_SF" ] && [ -f "/usr/local/bin/sf" ]; then
-  REAL_SF="/usr/local/bin/sf"
-fi
-
-PROJECT_BROWSER=$(python3 -c "
-import os, json
-
-def find_browser():
-    curr = os.getcwd()
-    while curr and curr != '/':
-        p = os.path.join(curr, '.vscode', 'settings.json')
-        if os.path.isfile(p):
-            try:
-                with open(p) as f:
-                    d = json.load(f)
-                b = d.get('salesforcedx-vscode-core.preferredBrowser') or d.get('openInBrowser.default') or d.get('workbench.externalBrowser') or ''
-                if b: return b
-            except Exception: pass
-        curr = os.path.dirname(curr)
-
-    ws_file = os.path.expanduser('~/.config/antigravity-project-browser/active-workspace.json')
-    if os.path.isfile(ws_file):
-        try:
-            with open(ws_file) as f:
-                ws_dir = json.load(f).get('workspace_dir', '')
-            if ws_dir and os.path.isdir(ws_dir):
-                p = os.path.join(ws_dir, '.vscode', 'settings.json')
-                if os.path.isfile(p):
-                    with open(p) as f:
-                        d = json.load(f)
-                    b = d.get('salesforcedx-vscode-core.preferredBrowser') or d.get('openInBrowser.default') or d.get('workbench.externalBrowser') or ''
-                    if b: return b
-        except Exception: pass
-    return ''
-
-print(find_browser())
-" 2>/dev/null || true)
-
-if [ -n "$PROJECT_BROWSER" ]; then
-  SF_FLAG="$PROJECT_BROWSER"
-  case "$PROJECT_BROWSER" in
-    firefox*|librewolf|waterfox|zen|*/firefox*) SF_FLAG="firefox" ;;
-    edge*|msedge|*/msedge|*/microsoft-edge*) SF_FLAG="edge" ;;
-    *) SF_FLAG="chrome" ;;
-  esac
-
-  has_browser=0
-  for arg in "$@"; do
-    if [[ "$arg" == "--browser" || "$arg" == "-b" || "$arg" == --browser=* ]]; then
-      has_browser=1
-      break
-    fi
-  done
-
-  if [[ $has_browser -eq 0 ]]; then
-    if [[ "$1" == "org" && ("$2" == "login" || "$2" == "open") ]]; then
-      exec "$REAL_SF" "$@" --browser "$SF_FLAG"
-    elif [[ "$1" == "force:auth:web:login" || "$1" == "auth:web:login" || "$1" == "force:org:open" || "$1" == "force:source:open" ]]; then
-      exec "$REAL_SF" "$@" --browser "$SF_FLAG"
-    fi
-  fi
-fi
-
-if [ -n "$REAL_SF" ]; then
-  exec "$REAL_SF" "$@"
-else
-  echo "sf binary not found on system PATH." >&2
-  exit 127
-fi
-GLOBAL_SF_EOF
-    chmod +x "$target_dir/sf"
-
-    # 2. Global Smart xdg-open wrapper
-    cat << 'GLOBAL_XDG_EOF' > "$target_dir/xdg-open"
-#!/bin/bash
-PROJECT_BROWSER_BIN=$(python3 -c "
-import os, json
-
-def find_bin():
-    curr = os.getcwd()
-    while curr and curr != '/':
-        p = os.path.join(curr, '.vscode', 'settings.json')
-        if os.path.isfile(p):
-            try:
-                with open(p) as f:
-                    d = json.load(f)
-                b = d.get('terminal.integrated.env.linux', {}).get('BROWSER') or d.get('workbench.externalBrowser') or d.get('openInBrowser.default') or ''
-                if b: return b
-            except Exception: pass
-        curr = os.path.dirname(curr)
-
-    ws_file = os.path.expanduser('~/.config/antigravity-project-browser/active-workspace.json')
-    if os.path.isfile(ws_file):
-        try:
-            with open(ws_file) as f:
-                ws_dir = json.load(f).get('workspace_dir', '')
-            if ws_dir and os.path.isdir(ws_dir):
-                p = os.path.join(ws_dir, '.vscode', 'settings.json')
-                if os.path.isfile(p):
-                    with open(p) as f:
-                        d = json.load(f)
-                    b = d.get('terminal.integrated.env.linux', {}).get('BROWSER') or d.get('workbench.externalBrowser') or d.get('openInBrowser.default') or ''
-                    if b: return b
-        except Exception: pass
-    return ''
-
-print(find_bin())
-" 2>/dev/null || true)
-
-if [ -n "$PROJECT_BROWSER_BIN" ] && command -v "$PROJECT_BROWSER_BIN" >/dev/null 2>&1; then
-  exec "$PROJECT_BROWSER_BIN" "$@"
-else
-  exec /usr/bin/xdg-open "$@"
-fi
-GLOBAL_XDG_EOF
-    chmod +x "$target_dir/xdg-open"
-
-    # 3. Global Smart gio wrapper
-    cat << 'GLOBAL_GIO_EOF' > "$target_dir/gio"
-#!/bin/bash
-if [ "$1" = "open" ]; then
-  shift
-  PROJECT_BROWSER_BIN=$(python3 -c "
-import os, json
-
-def find_bin():
-    curr = os.getcwd()
-    while curr and curr != '/':
-        p = os.path.join(curr, '.vscode', 'settings.json')
-        if os.path.isfile(p):
-            try:
-                with open(p) as f:
-                    d = json.load(f)
-                b = d.get('terminal.integrated.env.linux', {}).get('BROWSER') or d.get('workbench.externalBrowser') or d.get('openInBrowser.default') or ''
-                if b: return b
-            except Exception: pass
-        curr = os.path.dirname(curr)
-
-    ws_file = os.path.expanduser('~/.config/antigravity-project-browser/active-workspace.json')
-    if os.path.isfile(ws_file):
-        try:
-            with open(ws_file) as f:
-                ws_dir = json.load(f).get('workspace_dir', '')
-            if ws_dir and os.path.isdir(ws_dir):
-                p = os.path.join(ws_dir, '.vscode', 'settings.json')
-                if os.path.isfile(p):
-                    with open(p) as f:
-                        d = json.load(f)
-                    b = d.get('terminal.integrated.env.linux', {}).get('BROWSER') or d.get('workbench.externalBrowser') or d.get('openInBrowser.default') or ''
-                    if b: return b
-        except Exception: pass
-    return ''
-
-print(find_bin())
-" 2>/dev/null || true)
-
-  if [ -n "$PROJECT_BROWSER_BIN" ] && command -v "$PROJECT_BROWSER_BIN" >/dev/null 2>&1; then
-    exec "$PROJECT_BROWSER_BIN" "$@"
-  fi
-fi
-exec /usr/bin/gio "$@"
-GLOBAL_GIO_EOF
-    chmod +x "$target_dir/gio"
-
-    # 4. Global Smart kde-open wrappers
-    cp "$target_dir/xdg-open" "$target_dir/kde-open"
-    cp "$target_dir/xdg-open" "$target_dir/kde-open5"
-    cp "$target_dir/xdg-open" "$target_dir/sensible-browser"
-    cp "$target_dir/xdg-open" "$target_dir/x-www-browser"
-  done
+print(json.dumps(teams_apps))
+"
 }
 
 # Scan system for installed browsers (Predefined list + Dynamic Desktop file auto-discovery)
@@ -390,16 +233,663 @@ print(json.dumps(installed))
 "
 }
 
+# Interactive configuration of preferred default browser per MS Teams application instance
+configure_teams_browsers() {
+  print_banner
+  echo -e "${CYAN}${BOLD}💬 Microsoft Teams Multi-Instance Browser Router Configurator${NC}"
+  echo ""
+
+  TEAMS_JSON=$(scan_teams_apps)
+  TEAMS_COUNT=$(echo "$TEAMS_JSON" | python3 -c "import sys, json; print(len(json.load(sys.stdin)))")
+
+  if [ "$TEAMS_COUNT" -eq 0 ]; then
+    echo -e "${YELLOW}${INFO} No installed Microsoft Teams applications detected on your system.${NC}"
+    return 0
+  fi
+
+  echo -e "${BOLD}Installed Microsoft Teams Applications Detected on Your PC:${NC}"
+  echo ""
+  python3 -c "
+import sys, json
+apps = json.load(sys.stdin)
+for i, app in enumerate(apps):
+    print(f\"  \033[1m{i+1})\033[0m \033[36m\033[1m{app['name']}\033[0m \033[2m({app['desktop_file']})\033[0m\")
+" <<< "$TEAMS_JSON"
+  echo ""
+
+  SYSTEM_BROWSERS_JSON=$(scan_system_browsers)
+
+  TEAMS_RULES_DIR="$HOME/.config/antigravity-project-browser"
+  TEAMS_RULES_FILE="$TEAMS_RULES_DIR/teams-routing.json"
+  mkdir -p "$TEAMS_RULES_DIR"
+
+  SYSTEM_BROWSERS="$SYSTEM_BROWSERS_JSON" TEAMS_APPS="$TEAMS_JSON" TEAMS_RULES_FILE="$TEAMS_RULES_FILE" python3 -c "
+import os, sys, json
+
+system_browsers = json.loads(os.environ['SYSTEM_BROWSERS'])
+teams_apps = json.loads(os.environ['TEAMS_APPS'])
+teams_rules_file = os.environ['TEAMS_RULES_FILE']
+
+rules = {}
+if os.path.isfile(teams_rules_file):
+    try:
+        with open(teams_rules_file, 'r') as f:
+            rules = json.load(f)
+    except Exception:
+        rules = {}
+
+BOLD = '\033[1m'
+NC = '\033[0m'
+GREEN = '\033[32m'
+CYAN = '\033[36m'
+YELLOW = '\033[33m'
+
+for app in teams_apps:
+    app_id = app['id']
+    app_name = app['name']
+    curr_rule = rules.get(app_id, {})
+    curr_bname = curr_rule.get('browser_name', 'Default / Workspace Browser')
+
+    print(f'----------------------------------------------------------------------')
+    print(f'👉 Configured App: {BOLD}{app_name}{NC}')
+    print(f'   Desktop File:  {app[\"desktop_file\"]}')
+    print(f'   Current Choice: {GREEN}{curr_bname}{NC}\n')
+    print('   Select default web browser for this Teams instance:')
+    print(f'     {BOLD}0){NC} Default / Skip (Use workspace or system default browser)')
+    for i, b in enumerate(system_browsers):
+        print(f'     {BOLD}{i+1}){NC} {GREEN}{b[\"name\"]}{NC} ({b[\"bin\"]})')
+    print('')
+
+    while True:
+        try:
+            choice = input(f'Enter choice [0-{len(system_browsers)}] (default 0): ').strip()
+            if not choice or choice == '0':
+                rules.pop(app_id, None)
+                print(f'   ✔ {app_name} set to Default / Workspace Browser.\n')
+                break
+            elif choice.isdigit() and 1 <= int(choice) <= len(system_browsers):
+                idx = int(choice) - 1
+                b = system_browsers[idx]
+                rules[app_id] = {
+                    'name': app_name,
+                    'exec': app['exec'],
+                    'desktop_file': app['desktop_file'],
+                    'browser_name': b['name'],
+                    'browser_bin': b['bin'],
+                    'browser_slug': b['slug']
+                }
+                print(f'   ✔ Configured {app_name} -> {b[\"name\"]} ({b[\"bin\"]})\n')
+                break
+            else:
+                print('   ✖ Invalid choice. Please try again.')
+        except (EOFError, KeyboardInterrupt):
+            break
+
+with open(teams_rules_file, 'w') as f:
+    json.dump(rules, f, indent=2)
+"
+
+  echo -e "${GREEN}${CHECK} Microsoft Teams routing rules updated successfully!${NC}"
+  echo -e "   Saved to: $TEAMS_RULES_FILE"
+  echo ""
+}
+
+# Register system-wide XDG URL handler for Electron/VS Code openExternal calls & Teams routing
+install_desktop_url_handler() {
+  mkdir -p "$HOME/.local/bin" "$HOME/.local/share/applications"
+
+  cat << 'SMART_EOF' > "$HOME/.local/bin/antigravity-smart-open"
+#!/bin/bash
+URL="$1"
+
+PROJECT_BROWSER_BIN=$(python3 -c "
+import os, json, re
+
+def clean_jsonc(text):
+    pattern = r'(\"(?:\\\\.|[^\"\\\\])*\")|//.*|/\\*[\\s\\S]*?\\*/'
+    cleaned = re.sub(pattern, lambda m: m.group(1) if m.group(1) else '', text)
+    return re.sub(r',(\\s*[\}\]])', r'\1', cleaned)
+
+def find_bin():
+    # 1. Check Microsoft Teams per-instance routing rules first
+    teams_file = os.path.expanduser('~/.config/antigravity-project-browser/teams-routing.json')
+    if os.path.isfile(teams_file):
+        try:
+            with open(teams_file, 'r') as f:
+                rules = json.load(f)
+            if rules and isinstance(rules, dict):
+                # Layer 1: Ancestor Process Tree Inspection
+                curr_pid = os.getpid()
+                visited = set()
+                is_portal = False
+                while curr_pid and curr_pid > 1 and curr_pid not in visited:
+                    visited.add(curr_pid)
+                    cmdline, exe, cgroup = '', '', ''
+                    try:
+                        with open(f'/proc/{curr_pid}/cmdline', 'rb') as f:
+                            cmdline = f.read().replace(b'\x00', b' ').decode('utf-8', errors='ignore')
+                    except Exception: pass
+                    try:
+                        exe = os.readlink(f'/proc/{curr_pid}/exe')
+                    except Exception: pass
+                    try:
+                        with open(f'/proc/{curr_pid}/cgroup', 'r', errors='ignore') as f:
+                            cgroup = f.read()
+                    except Exception: pass
+
+                    if 'xdg-desktop-portal' in cgroup or 'portal' in cgroup or 'xdg-desktop-portal' in exe:
+                        is_portal = True
+
+                    for app_key, rule in rules.items():
+                        target_bin = rule.get('browser_bin', '')
+                        if not target_bin: continue
+                        matched = False
+                        if app_key.startswith('flatpak:'):
+                            fp_id = app_key.split('flatpak:', 1)[1]
+                            if fp_id in cgroup or fp_id in cmdline or (f'/{fp_id}' in exe):
+                                matched = True
+                        elif app_key.startswith('pwa:'):
+                            pwa_id = app_key.split('pwa:', 1)[1]
+                            if pwa_id in cmdline:
+                                matched = True
+                        else:
+                            exec_cmd = rule.get('exec', app_key)
+                            bin_name = os.path.basename(exec_cmd.split()[0]) if exec_cmd else app_key
+                            if (bin_name in cmdline or bin_name in exe) and not ('flatpak' in cgroup or '/app/' in exe):
+                                matched = True
+                        if matched:
+                            return target_bin
+
+                    ppid = 0
+                    try:
+                        with open(f'/proc/{curr_pid}/status', 'r', errors='ignore') as f:
+                            for line in f:
+                                if line.startswith('PPid:'):
+                                    ppid = int(line.split(':')[1].strip())
+                                    break
+                    except Exception: pass
+                    curr_pid = ppid
+
+                # Layer 2: Active Window Inspection via KWin DBus
+                try:
+                    import subprocess
+                    res = subprocess.run(['qdbus', 'org.kde.KWin', '/KWin', 'org.kde.KWin.queryWindowInfo'], capture_output=True, text=True, timeout=1)
+                    win_info = {}
+                    for line in res.stdout.splitlines():
+                        if ':' in line:
+                            k, v = line.split(':', 1)
+                            win_info[k.strip()] = v.strip()
+                    
+                    win_pid = win_info.get('pid', '')
+                    win_dt = win_info.get('desktopFile', '')
+                    win_cls = win_info.get('resourceClass', '')
+
+                    if win_pid and win_pid.isdigit():
+                        wpid = int(win_pid)
+                        w_cmd, w_exe, w_cg = '', '', ''
+                        try:
+                            with open(f'/proc/{wpid}/cmdline', 'rb') as f:
+                                w_cmd = f.read().replace(b'\x00', b' ').decode('utf-8', errors='ignore')
+                        except Exception: pass
+                        try:
+                            w_exe = os.readlink(f'/proc/{wpid}/exe')
+                        except Exception: pass
+                        try:
+                            with open(f'/proc/{wpid}/cgroup', 'r', errors='ignore') as f:
+                                w_cg = f.read()
+                        except Exception: pass
+
+                        for app_key, rule in rules.items():
+                            target_bin = rule.get('browser_bin', '')
+                            if not target_bin: continue
+                            if app_key.startswith('flatpak:'):
+                                fp_id = app_key.split('flatpak:', 1)[1]
+                                if fp_id in w_cg or fp_id in w_cmd or fp_id in win_dt or fp_id in win_cls or (f'/{fp_id}' in w_exe):
+                                    return target_bin
+                            else:
+                                exec_cmd = rule.get('exec', app_key)
+                                bin_name = os.path.basename(exec_cmd.split()[0]) if exec_cmd else app_key
+                                if (bin_name in w_cmd or bin_name in w_exe or bin_name in win_dt or bin_name in win_cls) and not ('flatpak' in w_cg or '/app/' in w_exe):
+                                    return target_bin
+                except Exception: pass
+
+                # Layer 3: Portal Fallback (If launched via xdg-desktop-portal, check active Flatpak cgroups)
+                if is_portal:
+                    for app_key, rule in rules.items():
+                        if app_key.startswith('flatpak:'):
+                            fp_id = app_key.split('flatpak:', 1)[1]
+                            target_bin = rule.get('browser_bin', '')
+                            if not target_bin: continue
+                            for p in os.listdir('/proc'):
+                                if p.isdigit():
+                                    try:
+                                        with open(f'/proc/{p}/cgroup', 'r', errors='ignore') as f_cg:
+                                            if fp_id in f_cg.read():
+                                                return target_bin
+                                    except Exception: pass
+        except Exception: pass
+
+    # 2. Check active directory or active-workspace setting
+    curr = os.getcwd()
+    while curr and curr != '/':
+        p = os.path.join(curr, '.vscode', 'settings.json')
+        if os.path.isfile(p):
+            try:
+                with open(p, 'r') as f:
+                    d = json.loads(clean_jsonc(f.read()))
+                b = d.get('terminal.integrated.env.linux', {}).get('BROWSER') or d.get('workbench.externalBrowser') or d.get('openInBrowser.default') or ''
+                if b: return b
+            except Exception: pass
+        curr = os.path.dirname(curr)
+
+    ws_file = os.path.expanduser('~/.config/antigravity-project-browser/active-workspace.json')
+    if os.path.isfile(ws_file):
+        try:
+            with open(ws_file) as f:
+                ws_dir = json.load(f).get('workspace_dir', '')
+            if ws_dir and os.path.isdir(ws_dir):
+                p = os.path.join(ws_dir, '.vscode', 'settings.json')
+                if os.path.isfile(p):
+                    with open(p, 'r') as f:
+                        d = json.loads(clean_jsonc(f.read()))
+                    b = d.get('terminal.integrated.env.linux', {}).get('BROWSER') or d.get('workbench.externalBrowser') or d.get('openInBrowser.default') or ''
+                    if b: return b
+        except Exception: pass
+    return ''
+
+print(find_bin())
+" 2>/dev/null || true)
+
+if [ -n "$PROJECT_BROWSER_BIN" ] && command -v "$PROJECT_BROWSER_BIN" >/dev/null 2>&1; then
+  exec "$PROJECT_BROWSER_BIN" "$URL"
+else
+  FALLBACK=$(which brave-origin brave google-chrome-stable firefox 2>/dev/null | head -n 1)
+  if [ -n "$FALLBACK" ]; then
+    exec "$FALLBACK" "$URL"
+  else
+    exec /usr/bin/xdg-open "$URL"
+  fi
+fi
+SMART_EOF
+  chmod +x "$HOME/.local/bin/antigravity-smart-open"
+
+  cat << 'DESKTOP_EOF' > "$HOME/.local/share/applications/antigravity-browser-opener.desktop"
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Antigravity Smart Browser Router
+Comment=Per-project & per-Teams browser router for Antigravity & VS Code
+Exec=/home/mpi/.local/bin/antigravity-smart-open %u
+Icon=internet-web-browser
+Terminal=false
+Categories=Network;WebBrowser;
+MimeType=x-scheme-handler/http;x-scheme-handler/https;text/html;
+DESKTOP_EOF
+
+  xdg-mime default antigravity-browser-opener.desktop x-scheme-handler/http 2>/dev/null || true
+  xdg-mime default antigravity-browser-opener.desktop x-scheme-handler/https 2>/dev/null || true
+}
+
+# Install global smart wrappers into Antigravity IDE bin and ~/.local/bin to intercept IDE extension processes
+install_global_smart_wrappers() {
+  local target_dirs=("$HOME/.gemini/antigravity-ide/bin" "$HOME/.local/bin")
+  for target_dir in "${target_dirs[@]}"; do
+    mkdir -p "$target_dir"
+
+    # 1. Global Smart sf wrapper
+    cat << 'GLOBAL_SF_EOF' > "$target_dir/sf"
+#!/bin/bash
+REAL_SF=$(which -a sf 2>/dev/null | grep -v "antigravity-ide/bin/sf" | grep -v ".local/bin/sf" | grep -v "antigravity-wrappers" | head -n 1)
+if [ -z "$REAL_SF" ] && [ -f "$HOME/.nvm/versions/node/v24.16.0/bin/sf" ]; then
+  REAL_SF="$HOME/.nvm/versions/node/v24.16.0/bin/sf"
+elif [ -z "$REAL_SF" ] && [ -f "/usr/local/bin/sf" ]; then
+  REAL_SF="/usr/local/bin/sf"
+fi
+
+PROJECT_BROWSER=$(python3 -c "
+import os, json, re
+
+def clean_jsonc(text):
+    pattern = r'(\"(?:\\\\.|[^\"\\\\])*\")|//.*|/\\*[\\s\\S]*?\\*/'
+    cleaned = re.sub(pattern, lambda m: m.group(1) if m.group(1) else '', text)
+    return re.sub(r',(\\s*[\}\]])', r'\1', cleaned)
+
+def find_browser():
+    curr = os.getcwd()
+    while curr and curr != '/':
+        p = os.path.join(curr, '.vscode', 'settings.json')
+        if os.path.isfile(p):
+            try:
+                with open(p, 'r') as f:
+                    d = json.loads(clean_jsonc(f.read()))
+                b = d.get('salesforcedx-vscode-core.preferredBrowser') or d.get('openInBrowser.default') or d.get('workbench.externalBrowser') or ''
+                if b: return b
+            except Exception: pass
+        curr = os.path.dirname(curr)
+
+    ws_file = os.path.expanduser('~/.config/antigravity-project-browser/active-workspace.json')
+    if os.path.isfile(ws_file):
+        try:
+            with open(ws_file) as f:
+                ws_dir = json.load(f).get('workspace_dir', '')
+            if ws_dir and os.path.isdir(ws_dir):
+                p = os.path.join(ws_dir, '.vscode', 'settings.json')
+                if os.path.isfile(p):
+                    with open(p, 'r') as f:
+                        d = json.loads(clean_jsonc(f.read()))
+                    b = d.get('salesforcedx-vscode-core.preferredBrowser') or d.get('openInBrowser.default') or d.get('workbench.externalBrowser') or ''
+                    if b: return b
+        except Exception: pass
+    return ''
+
+print(find_browser())
+" 2>/dev/null || true)
+
+if [ -n "$PROJECT_BROWSER" ]; then
+  SF_FLAG="$PROJECT_BROWSER"
+  case "$PROJECT_BROWSER" in
+    firefox*|librewolf|waterfox|zen|*/firefox*) SF_FLAG="firefox" ;;
+    edge*|msedge|*/msedge|*/microsoft-edge*) SF_FLAG="edge" ;;
+    *) SF_FLAG="chrome" ;;
+  esac
+
+  has_browser=0
+  for arg in "$@"; do
+    if [[ "$arg" == "--browser" || "$arg" == "-b" || "$arg" == --browser=* ]]; then
+      has_browser=1
+      break
+    fi
+  done
+
+  if [[ $has_browser -eq 0 ]]; then
+    if [[ "$1" == "org" && ("$2" == "login" || "$2" == "open") ]]; then
+      exec "$REAL_SF" "$@" --browser "$SF_FLAG"
+    elif [[ "$1" == "force:auth:web:login" || "$1" == "auth:web:login" || "$1" == "force:org:open" || "$1" == "force:source:open" ]]; then
+      exec "$REAL_SF" "$@" --browser "$SF_FLAG"
+    fi
+  fi
+fi
+
+if [ -n "$REAL_SF" ]; then
+  exec "$REAL_SF" "$@"
+else
+  echo "sf binary not found on system PATH." >&2
+  exit 127
+fi
+GLOBAL_SF_EOF
+    chmod +x "$target_dir/sf"
+
+    # 2. Global Smart xdg-open wrapper
+    cat << 'GLOBAL_XDG_EOF' > "$target_dir/xdg-open"
+#!/bin/bash
+PROJECT_BROWSER_BIN=$(python3 -c "
+import os, json, re
+
+def clean_jsonc(text):
+    pattern = r'(\"(?:\\\\.|[^\"\\\\])*\")|//.*|/\\*[\\s\\S]*?\\*/'
+    cleaned = re.sub(pattern, lambda m: m.group(1) if m.group(1) else '', text)
+    return re.sub(r',(\\s*[\}\]])', r'\1', cleaned)
+
+def find_bin():
+    # Check Teams routing rules first
+    teams_file = os.path.expanduser('~/.config/antigravity-project-browser/teams-routing.json')
+    if os.path.isfile(teams_file):
+        try:
+            with open(teams_file, 'r') as f:
+                rules = json.load(f)
+            if rules and isinstance(rules, dict):
+                curr_pid = os.getpid()
+                visited = set()
+                is_portal = False
+                while curr_pid and curr_pid > 1 and curr_pid not in visited:
+                    visited.add(curr_pid)
+                    cmdline, exe, cgroup = '', '', ''
+                    try:
+                        with open(f'/proc/{curr_pid}/cmdline', 'rb') as f:
+                            cmdline = f.read().replace(b'\x00', b' ').decode('utf-8', errors='ignore')
+                    except Exception: pass
+                    try:
+                        exe = os.readlink(f'/proc/{curr_pid}/exe')
+                    except Exception: pass
+                    try:
+                        with open(f'/proc/{curr_pid}/cgroup', 'r', errors='ignore') as f:
+                            cgroup = f.read()
+                    except Exception: pass
+
+                    if 'xdg-desktop-portal' in cgroup or 'portal' in cgroup or 'xdg-desktop-portal' in exe:
+                        is_portal = True
+
+                    for app_key, rule in rules.items():
+                        target_bin = rule.get('browser_bin', '')
+                        if not target_bin: continue
+                        matched = False
+                        if app_key.startswith('flatpak:'):
+                            fp_id = app_key.split('flatpak:', 1)[1]
+                            if fp_id in cgroup or fp_id in cmdline or (f'/{fp_id}' in exe):
+                                matched = True
+                        elif app_key.startswith('pwa:'):
+                            pwa_id = app_key.split('pwa:', 1)[1]
+                            if pwa_id in cmdline:
+                                matched = True
+                        else:
+                            exec_cmd = rule.get('exec', app_key)
+                            bin_name = os.path.basename(exec_cmd.split()[0]) if exec_cmd else app_key
+                            if (bin_name in cmdline or bin_name in exe) and not ('flatpak' in cgroup or '/app/' in exe):
+                                matched = True
+                        if matched:
+                            return target_bin
+
+                    ppid = 0
+                    try:
+                        with open(f'/proc/{curr_pid}/status', 'r', errors='ignore') as f:
+                            for line in f:
+                                if line.startswith('PPid:'):
+                                    ppid = int(line.split(':')[1].strip())
+                                    break
+                    except Exception: pass
+                    curr_pid = ppid
+
+                if is_portal:
+                    for app_key, rule in rules.items():
+                        if app_key.startswith('flatpak:'):
+                            fp_id = app_key.split('flatpak:', 1)[1]
+                            target_bin = rule.get('browser_bin', '')
+                            if not target_bin: continue
+                            for p in os.listdir('/proc'):
+                                if p.isdigit():
+                                    try:
+                                        with open(f'/proc/{p}/cgroup', 'r', errors='ignore') as f_cg:
+                                            if fp_id in f_cg.read():
+                                                return target_bin
+                                    except Exception: pass
+        except Exception: pass
+
+    curr = os.getcwd()
+    while curr and curr != '/':
+        p = os.path.join(curr, '.vscode', 'settings.json')
+        if os.path.isfile(p):
+            try:
+                with open(p, 'r') as f:
+                    d = json.loads(clean_jsonc(f.read()))
+                b = d.get('terminal.integrated.env.linux', {}).get('BROWSER') or d.get('workbench.externalBrowser') or d.get('openInBrowser.default') or ''
+                if b: return b
+            except Exception: pass
+        curr = os.path.dirname(curr)
+
+    ws_file = os.path.expanduser('~/.config/antigravity-project-browser/active-workspace.json')
+    if os.path.isfile(ws_file):
+        try:
+            with open(ws_file) as f:
+                ws_dir = json.load(f).get('workspace_dir', '')
+            if ws_dir and os.path.isdir(ws_dir):
+                p = os.path.join(ws_dir, '.vscode', 'settings.json')
+                if os.path.isfile(p):
+                    with open(p, 'r') as f:
+                        d = json.loads(clean_jsonc(f.read()))
+                    b = d.get('terminal.integrated.env.linux', {}).get('BROWSER') or d.get('workbench.externalBrowser') or d.get('openInBrowser.default') or ''
+                    if b: return b
+        except Exception: pass
+    return ''
+
+print(find_bin())
+" 2>/dev/null || true)
+
+if [ -n "$PROJECT_BROWSER_BIN" ] && command -v "$PROJECT_BROWSER_BIN" >/dev/null 2>&1; then
+  exec "$PROJECT_BROWSER_BIN" "$@"
+else
+  exec /usr/bin/xdg-open "$@"
+fi
+GLOBAL_XDG_EOF
+    chmod +x "$target_dir/xdg-open"
+
+    # 3. Global Smart gio wrapper
+    cat << 'GLOBAL_GIO_EOF' > "$target_dir/gio"
+#!/bin/bash
+if [ "$1" = "open" ]; then
+  shift
+  PROJECT_BROWSER_BIN=$(python3 -c "
+import os, json, re
+
+def clean_jsonc(text):
+    pattern = r'(\"(?:\\\\.|[^\"\\\\])*\")|//.*|/\\*[\\s\\S]*?\\*/'
+    cleaned = re.sub(pattern, lambda m: m.group(1) if m.group(1) else '', text)
+    return re.sub(r',(\\s*[\}\]])', r'\1', cleaned)
+
+def find_bin():
+    teams_file = os.path.expanduser('~/.config/antigravity-project-browser/teams-routing.json')
+    if os.path.isfile(teams_file):
+        try:
+            with open(teams_file, 'r') as f:
+                rules = json.load(f)
+            if rules and isinstance(rules, dict):
+                curr_pid = os.getpid()
+                visited = set()
+                is_portal = False
+                while curr_pid and curr_pid > 1 and curr_pid not in visited:
+                    visited.add(curr_pid)
+                    cmdline, exe, cgroup = '', '', ''
+                    try:
+                        with open(f'/proc/{curr_pid}/cmdline', 'rb') as f:
+                            cmdline = f.read().replace(b'\x00', b' ').decode('utf-8', errors='ignore')
+                    except Exception: pass
+                    try:
+                        exe = os.readlink(f'/proc/{curr_pid}/exe')
+                    except Exception: pass
+                    try:
+                        with open(f'/proc/{curr_pid}/cgroup', 'r', errors='ignore') as f:
+                            cgroup = f.read()
+                    except Exception: pass
+
+                    if 'xdg-desktop-portal' in cgroup or 'portal' in cgroup or 'xdg-desktop-portal' in exe:
+                        is_portal = True
+
+                    for app_key, rule in rules.items():
+                        target_bin = rule.get('browser_bin', '')
+                        if not target_bin: continue
+                        matched = False
+                        if app_key.startswith('flatpak:'):
+                            fp_id = app_key.split('flatpak:', 1)[1]
+                            if fp_id in cgroup or fp_id in cmdline or (f'/{fp_id}' in exe):
+                                matched = True
+                        elif app_key.startswith('pwa:'):
+                            pwa_id = app_key.split('pwa:', 1)[1]
+                            if pwa_id in cmdline:
+                                matched = True
+                        else:
+                            exec_cmd = rule.get('exec', app_key)
+                            bin_name = os.path.basename(exec_cmd.split()[0]) if exec_cmd else app_key
+                            if (bin_name in cmdline or bin_name in exe) and not ('flatpak' in cgroup or '/app/' in exe):
+                                matched = True
+                        if matched:
+                            return target_bin
+
+                    ppid = 0
+                    try:
+                        with open(f'/proc/{curr_pid}/status', 'r', errors='ignore') as f:
+                            for line in f:
+                                if line.startswith('PPid:'):
+                                    ppid = int(line.split(':')[1].strip())
+                                    break
+                    except Exception: pass
+                    curr_pid = ppid
+
+                if is_portal:
+                    for app_key, rule in rules.items():
+                        if app_key.startswith('flatpak:'):
+                            fp_id = app_key.split('flatpak:', 1)[1]
+                            target_bin = rule.get('browser_bin', '')
+                            if not target_bin: continue
+                            for p in os.listdir('/proc'):
+                                if p.isdigit():
+                                    try:
+                                        with open(f'/proc/{p}/cgroup', 'r', errors='ignore') as f_cg:
+                                            if fp_id in f_cg.read():
+                                                return target_bin
+                                    except Exception: pass
+        except Exception: pass
+
+    curr = os.getcwd()
+    while curr and curr != '/':
+        p = os.path.join(curr, '.vscode', 'settings.json')
+        if os.path.isfile(p):
+            try:
+                with open(p, 'r') as f:
+                    d = json.loads(clean_jsonc(f.read()))
+                b = d.get('terminal.integrated.env.linux', {}).get('BROWSER') or d.get('workbench.externalBrowser') or d.get('openInBrowser.default') or ''
+                if b: return b
+            except Exception: pass
+        curr = os.path.dirname(curr)
+
+    ws_file = os.path.expanduser('~/.config/antigravity-project-browser/active-workspace.json')
+    if os.path.isfile(ws_file):
+        try:
+            with open(ws_file) as f:
+                ws_dir = json.load(f).get('workspace_dir', '')
+            if ws_dir and os.path.isdir(ws_dir):
+                p = os.path.join(ws_dir, '.vscode', 'settings.json')
+                if os.path.isfile(p):
+                    with open(p, 'r') as f:
+                        d = json.loads(clean_jsonc(f.read()))
+                    b = d.get('terminal.integrated.env.linux', {}).get('BROWSER') or d.get('workbench.externalBrowser') or d.get('openInBrowser.default') or ''
+                    if b: return b
+        except Exception: pass
+    return ''
+
+print(find_bin())
+" 2>/dev/null || true)
+
+  if [ -n "$PROJECT_BROWSER_BIN" ] && command -v "$PROJECT_BROWSER_BIN" >/dev/null 2>&1; then
+    exec "$PROJECT_BROWSER_BIN" "$@"
+  fi
+fi
+exec /usr/bin/gio "$@"
+GLOBAL_GIO_EOF
+    chmod +x "$target_dir/gio"
+
+    # 4. Global Smart kde-open wrappers
+    cp "$target_dir/xdg-open" "$target_dir/kde-open"
+    cp "$target_dir/xdg-open" "$target_dir/kde-open5"
+    cp "$target_dir/xdg-open" "$target_dir/sensible-browser"
+    cp "$target_dir/xdg-open" "$target_dir/x-www-browser"
+  done
+}
+
 get_workspace_config() {
   python3 -c "
-import os, json
+import os, json, re
+
+def clean_jsonc(text):
+    pattern = r'(\"(?:\\\\.|[^\"\\\\])*\")|//.*|/\\*[\\s\\S]*?\\*/'
+    cleaned = re.sub(pattern, lambda m: m.group(1) if m.group(1) else '', text)
+    return re.sub(r',(\\s*[\}\]])', r'\1', cleaned)
+
 curr = os.getcwd()
 while curr and curr != '/':
     p = os.path.join(curr, '.vscode', 'settings.json')
     if os.path.isfile(p):
         try:
             with open(p, 'r') as f:
-                data = json.load(f)
+                data = json.loads(clean_jsonc(f.read()))
             browser = data.get('salesforcedx-vscode-core.preferredBrowser') or data.get('openInBrowser.default') or data.get('workbench.externalBrowser') or ''
             env_browser = data.get('terminal.integrated.env.linux', {}).get('BROWSER', '')
             path = data.get('terminal.integrated.env.linux', {}).get('PATH', '')
@@ -419,24 +909,44 @@ show_status() {
   CFG=$(get_workspace_config || true)
   if [ -z "$CFG" ]; then
     echo -e "${YELLOW}${INFO} No project browser configured in this workspace (.vscode/settings.json).${NC}"
-    echo -e "   Run ${BOLD}./setup-project-browser.sh${NC} to set one up."
-    return 0
+  else
+    IFS='|' read -r CONFIG_SLUG CONFIG_BIN CONFIG_PATH <<< "$CFG"
+    WRAPPER_DIR="$WRAPPER_BASE_DIR/$CONFIG_SLUG"
+
+    echo -e "${GREEN}${CHECK} Preferred Workspace Browser:${NC} ${BOLD}$CONFIG_SLUG${NC}"
+    echo -e "   Target Binary: $CONFIG_BIN"
+    echo -e "   Wrapper Dir:   $WRAPPER_DIR"
+    echo ""
+
+    if [[ ":$PATH:" == *":$WRAPPER_DIR:"* ]]; then
+      echo -e "${GREEN}${CHECK} Active Subshell PATH:${NC} Wrapper directory IS active in this terminal session."
+    else
+      echo -e "${YELLOW}⚠️  Active Subshell PATH:${NC} Wrapper directory is NOT active in this current terminal tab."
+      echo -e "   ${BOLD}To activate in this terminal, run:${NC} ${GREEN}source .vscode/env.sh${NC}"
+      echo -e "   ${DIM}(Or open a new terminal tab in Antigravity/VS Code)${NC}"
+    fi
   fi
-
-  IFS='|' read -r CONFIG_SLUG CONFIG_BIN CONFIG_PATH <<< "$CFG"
-  WRAPPER_DIR="$WRAPPER_BASE_DIR/$CONFIG_SLUG"
-
-  echo -e "${GREEN}${CHECK} Preferred Browser Setting:${NC} ${BOLD}$CONFIG_SLUG${NC}"
-  echo -e "   Target Binary: $CONFIG_BIN"
-  echo -e "   Wrapper Dir:   $WRAPPER_DIR"
   echo ""
 
-  if [[ ":$PATH:" == *":$WRAPPER_DIR:"* ]]; then
-    echo -e "${GREEN}${CHECK} Active Subshell PATH:${NC} Wrapper directory IS active in this terminal session."
+  TEAMS_RULES_FILE="$HOME/.config/antigravity-project-browser/teams-routing.json"
+  echo -e "${CYAN}${BOLD}💬 Microsoft Teams Per-Instance Browser Routing Rules:${NC}"
+  if [ -f "$TEAMS_RULES_FILE" ]; then
+    python3 -c "
+import os, json
+file_path = os.path.expanduser('~/.config/antigravity-project-browser/teams-routing.json')
+try:
+    with open(file_path, 'r') as f:
+        data = json.load(f)
+    if data:
+        for app_id, r in data.items():
+            print(f\"   • \033[1m{r.get('name', app_id)}\033[0m -> \033[32m{r.get('browser_name')}\033[0m ({r.get('browser_bin')})\")
+    else:
+        print('   \033[2mNo custom Teams routing rules defined (Uses workspace/system default).\033[0m')
+except Exception:
+    print('   \033[2mNo custom Teams routing rules defined.\033[0m')
+"
   else
-    echo -e "${YELLOW}⚠️  Active Subshell PATH:${NC} Wrapper directory is NOT yet active in this current terminal tab."
-    echo -e "   ${BOLD}To activate in this terminal, run:${NC} ${GREEN}source .vscode/env.sh${NC}"
-    echo -e "   ${DIM}(Or open a new terminal tab in Antigravity/VS Code)${NC}"
+    echo -e "   ${DIM}No custom Teams routing rules defined (Uses workspace/system default).${NC}"
   fi
   echo ""
 }
@@ -445,15 +955,20 @@ reset_workspace() {
   print_banner
   if [ ! -f "$SETTINGS_FILE" ]; then
     echo -e "${YELLOW}${INFO} No .vscode/settings.json found in current directory to reset.${NC}"
-    return 0
-  fi
+  else
+    python3 -c "
+import json, os, re
 
-  python3 -c "
-import json, os
+def clean_jsonc(text):
+    pattern = r'(\"(?:\\\\.|[^\"\\\\])*\")|//.*|/\\*[\\s\\S]*?\\*/'
+    cleaned = re.sub(pattern, lambda m: m.group(1) if m.group(1) else '', text)
+    return re.sub(r',(\\s*[\}\]])', r'\1', cleaned)
+
 file_path = '$SETTINGS_FILE'
 try:
     with open(file_path, 'r') as f:
-        data = json.load(f)
+        content = f.read()
+    data = json.loads(clean_jsonc(content))
     data.pop('salesforcedx-vscode-core.preferredBrowser', None)
     data.pop('openInBrowser.default', None)
     data.pop('workbench.externalBrowser', None)
@@ -474,8 +989,18 @@ try:
 except Exception as e:
     print('ERROR:', e)
 "
-  rm -f "$ENV_HELPER_FILE"
-  echo -e "${GREEN}${CHECK} Workspace browser settings reset successfully.${NC}"
+    rm -f "$ENV_HELPER_FILE"
+    echo -e "${GREEN}${CHECK} Workspace browser settings reset successfully.${NC}"
+  fi
+
+  TEAMS_RULES_FILE="$HOME/.config/antigravity-project-browser/teams-routing.json"
+  if [ -f "$TEAMS_RULES_FILE" ]; then
+    read -rp "Do you also want to clear all Microsoft Teams browser routing rules? [y/N]: " RESET_TEAMS
+    if [[ "$RESET_TEAMS" =~ ^[Yy] ]]; then
+      rm -f "$TEAMS_RULES_FILE"
+      echo -e "${GREEN}${CHECK} Microsoft Teams routing rules cleared successfully.${NC}"
+    fi
+  fi
 }
 
 run_test() {
@@ -513,6 +1038,14 @@ case "${1:-}" in
     ;;
   --status|-s)
     show_status
+    if [ "$IS_SOURCED" -eq 1 ]; then return 0; else exit 0; fi
+    ;;
+  --teams|-tm)
+    configure_teams_browsers
+    if [ "$IS_SOURCED" -eq 1 ]; then return 0; else exit 0; fi
+    ;;
+  --rename-teams|--teams-rename)
+    "$(dirname "${BASH_SOURCE[0]}")/customize-teams-names.sh"
     if [ "$IS_SOURCED" -eq 1 ]; then return 0; else exit 0; fi
     ;;
   --reset|-r)
@@ -704,52 +1237,103 @@ cp "$WRAPPER_DIR/kde-open" "$WRAPPER_DIR/kde-open5"
 cp "$WRAPPER_DIR/kde-open" "$WRAPPER_DIR/sensible-browser"
 cp "$WRAPPER_DIR/kde-open" "$WRAPPER_DIR/x-www-browser"
 
-# 5. Configure local project .vscode/settings.json
+# 5. Configure local project .vscode/settings.json (Preserves JSONC comments & existing keys)
 mkdir -p "$VSCODE_DIR"
 
 BROWSER_BIN="$SELECTED_BIN" \
 BROWSER_SLUG="$SELECTED_SLUG" \
 SF_BROWSER_FLAG="$SF_BROWSER_FLAG" \
 python3 -c "
-import os, json
+import os, json, re
+
+def clean_jsonc(text):
+    pattern = r'(\"(?:\\\\.|[^\"\\\\])*\")|//.*|/\\*[\\s\\S]*?\\*/'
+    cleaned = re.sub(pattern, lambda m: m.group(1) if m.group(1) else '', text)
+    return re.sub(r',(\\s*[\}\]])', r'\1', cleaned)
 
 file_path = './.vscode/settings.json'
 browser_bin = os.environ['BROWSER_BIN']
 browser_slug = os.environ['BROWSER_SLUG']
 sf_flag = os.environ['SF_BROWSER_FLAG']
+wrapper_path = '\${env:HOME}/.local/share/antigravity-wrappers/' + browser_slug
 
 os.makedirs(os.path.dirname(file_path), exist_ok=True)
-data = {}
+content = ''
 if os.path.exists(file_path):
     try:
         with open(file_path, 'r') as f:
-            data = json.load(f)
+            content = f.read()
     except Exception:
-        data = {}
+        content = ''
 
-env_linux = data.get('terminal.integrated.env.linux', {})
-if not isinstance(env_linux, dict):
-    env_linux = {}
+try:
+    data = json.loads(clean_jsonc(content))
+except Exception:
+    data = {}
 
-wrapper_path = '\${env:HOME}/.local/share/antigravity-wrappers/' + browser_slug
-env_linux['BROWSER'] = browser_bin
-env_linux['PATH'] = wrapper_path + ':\${env:PATH}'
+if not content.strip() or not data:
+    data['terminal.integrated.env.linux'] = {
+        'BROWSER': browser_bin,
+        'PATH': wrapper_path + ':\${env:PATH}'
+    }
+    data['workbench.externalBrowser'] = browser_bin
+    data['salesforcedx-vscode-core.preferredBrowser'] = sf_flag
+    data['openInBrowser.default'] = browser_bin
+    new_content = json.dumps(data, indent=2) + '\n'
+else:
+    if '\"workbench.externalBrowser\"' in content:
+        content = re.sub(r'\"workbench\.externalBrowser\"\s*:\s*\"[^\"]*\"', f'\"workbench.externalBrowser\": \"{browser_bin}\"', content)
+    if '\"salesforcedx-vscode-core.preferredBrowser\"' in content:
+        content = re.sub(r'\"salesforcedx-vscode-core\.preferredBrowser\"\s*:\s*\"[^\"]*\"', f'\"salesforcedx-vscode-core.preferredBrowser\": \"{sf_flag}\"', content)
+    if '\"openInBrowser.default\"' in content:
+        content = re.sub(r'\"openInBrowser\.default\"\s*:\s*\"[^\"]*\"', f'\"openInBrowser.default\": \"{browser_bin}\"', content)
 
-data['terminal.integrated.env.linux'] = env_linux
-data['workbench.externalBrowser'] = browser_bin
-data['salesforcedx-vscode-core.preferredBrowser'] = sf_flag
-data['openInBrowser.default'] = browser_bin
+    if '\"terminal.integrated.env.linux\"' in content:
+        content = re.sub(r'\"BROWSER\"\s*:\s*\"[^\"]*\"', f'\"BROWSER\": \"{browser_bin}\"', content)
+        content = re.sub(r'\"PATH\"\s*:\s*\"[^\"]*antigravity-wrappers/[^\"]*\"', f'\"PATH\": \"{wrapper_path}:\${{env:PATH}}\"', content)
+
+    keys_to_add = []
+    if '\"workbench.externalBrowser\"' not in content:
+        keys_to_add.append(f'  \"workbench.externalBrowser\": \"{browser_bin}\"')
+    if '\"salesforcedx-vscode-core.preferredBrowser\"' not in content:
+        keys_to_add.append(f'  \"salesforcedx-vscode-core.preferredBrowser\": \"{sf_flag}\"')
+    if '\"openInBrowser.default\"' not in content:
+        keys_to_add.append(f'  \"openInBrowser.default\": \"{browser_bin}\"')
+    if '\"terminal.integrated.env.linux\"' not in content:
+        env_block = f'''  \"terminal.integrated.env.linux\": {{
+    \"BROWSER\": \"{browser_bin}\",
+    \"PATH\": \"{wrapper_path}:\${{env:PATH}}\"
+  }}'''
+        keys_to_add.append(env_block)
+
+    if keys_to_add:
+        last_brace_idx = content.rfind('}')
+        if last_brace_idx != -1:
+            before_brace = content[:last_brace_idx].rstrip()
+            after_brace = content[last_brace_idx:]
+            if not before_brace.endswith('{') and not before_brace.endswith(','):
+                before_brace = before_brace + ','
+            insertion = '\n' + ',\n'.join(keys_to_add) + '\n'
+            new_content = before_brace + insertion + after_brace
+        else:
+            new_content = content
+    else:
+        new_content = content
 
 with open(file_path, 'w') as f:
-    json.dump(data, f, indent=2)
-    f.write('\n')
+    f.write(new_content)
 "
 
-# 6. Configure local project .vscode/tasks.json
+# 6. Configure local project .vscode/tasks.json (Preserves JSONC comments & existing tasks)
 BROWSER_BIN="$SELECTED_BIN" \
 BROWSER_NAME="$SELECTED_NAME" \
 python3 -c "
-import os, json
+import os, json, re
+
+def clean_jsonc(text):
+    pattern = r'(\"(?:\\\\.|[^\"\\\\])*\")|//.*|/\\*[\\s\\S]*?\\*/'
+    cleaned = re.sub(pattern, lambda m: m.group(1) if m.group(1) else '', text)
+    return re.sub(r',(\\s*[\}\]])', r'\1', cleaned)
 
 tasks_file = './.vscode/tasks.json'
 browser_bin = os.environ['BROWSER_BIN']
@@ -760,7 +1344,8 @@ tasks_data = {}
 if os.path.exists(tasks_file):
     try:
         with open(tasks_file, 'r') as f:
-            tasks_data = json.load(f)
+            content = f.read()
+        tasks_data = json.loads(clean_jsonc(content))
     except Exception:
         tasks_data = {}
 
@@ -827,6 +1412,20 @@ echo -e "   ${BOLD}Wrappers:${NC}    $WRAPPER_DIR & ~/.local/bin/ (Global Smart 
 echo -e "   ${BOLD}Settings:${NC}    $SETTINGS_FILE (Added workbench.externalBrowser)"
 echo -e "   ${BOLD}Env Script:${NC}  $ENV_HELPER_FILE"
 echo ""
+
+# Check for Teams applications and offer optional per-Teams browser configuration during interactive setup
+if [ -z "$CHOSEN_INPUT" ]; then
+  TEAMS_JSON=$(scan_teams_apps)
+  TEAMS_COUNT=$(echo "$TEAMS_JSON" | python3 -c "import sys, json; print(len(json.load(sys.stdin)))")
+  if [ "$TEAMS_COUNT" -gt 0 ]; then
+    echo -e "${CYAN}${BOLD}💬 Detected $TEAMS_COUNT Microsoft Teams application(s) installed on your PC.${NC}"
+    read -rp "Would you like to configure default web browsers per Microsoft Teams instance? [Y/n]: " WANT_TEAMS
+    if [[ -z "$WANT_TEAMS" || "$WANT_TEAMS" =~ ^[Yy] ]]; then
+      echo ""
+      configure_teams_browsers
+    fi
+  fi
+fi
 
 echo -e "${CYAN}${BOLD}📋 HOW TO USE IN YOUR TERMINAL & VS CODE EXTENSIONS:${NC}"
 if [ "$IS_SOURCED" -eq 1 ]; then

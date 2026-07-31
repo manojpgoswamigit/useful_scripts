@@ -107,11 +107,14 @@ When you run the script, it updates your project's `.vscode/settings.json`.
 
 | Command / Option | Description |
 | :--- | :--- |
-| `setup-project-browser` | Launches interactive browser selection menu scanning your system. |
+| `setup-project-browser` | Launches interactive browser selection menu scanning your system & MS Teams apps. |
 | `setup-project-browser [name]` | Directly sets the workspace to `[name]` (e.g. `firefox`, `chrome`, `edge`). |
-| `setup-project-browser --status` (`-s`) | Displays current workspace settings and checks if the wrapper is active in your terminal shell. |
+| `setup-project-browser --teams` (`-tm`) | Configures preferred default web browser rules per installed MS Teams application instance. |
+| `setup-project-browser --rename-teams` | Customizes taskbar hover names (`Name=`), tooltips (`Comment=`), and icons (`Icon=`) per Teams app. |
+| `customize-teams-names.sh` | Standalone script to interactively rename Teams apps and refresh KDE Plasma taskbar tooltips. |
+| `setup-project-browser --status` (`-s`) | Displays current workspace settings, active shell PATH status, and MS Teams routing rules. |
 | `setup-project-browser --test` (`-t`) | Launches a test URL (`https://example.com`) in the configured browser. |
-| `setup-project-browser --reset` (`-r`) | Removes project browser overrides from `.vscode/settings.json`. |
+| `setup-project-browser --reset` (`-r`) | Removes project browser overrides from `.vscode/settings.json` and optional Teams rules. |
 | `setup-project-browser --help` (`-h`) | Displays command usage and examples. |
 
 ---
