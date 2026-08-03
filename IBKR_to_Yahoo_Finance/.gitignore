@@ -1,0 +1,15 @@
+# Ignore all financial CSV files in inputs and outputs directories to protect private data
+inputs/*.csv
+outputs/*.csv
+
+# Ignore any loose CSV files in IBKR_to_Yahoo_Finance directory, except the sample template
+*.csv
+!yahoo_sample-portfolio.csv
+!.gitkeep
+
+# Python bytecode and test cache artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage

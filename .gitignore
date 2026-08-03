@@ -1,0 +1,10 @@
+# IBKR to Yahoo Finance CSV files (financial data protection)
+IBKR_to_Yahoo_Finance/inputs/*.csv
+IBKR_to_Yahoo_Finance/outputs/*.csv
+IBKR_to_Yahoo_Finance/*.csv
+!IBKR_to_Yahoo_Finance/yahoo_sample-portfolio.csv
+
+# Python byte-compiled / environment / cache files
+__pycache__/
+*.py[cod]
+.pytest_cache/
