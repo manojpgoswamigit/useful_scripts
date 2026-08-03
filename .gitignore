@@ -8,3 +8,8 @@ IBKR_to_Yahoo_Finance/*.csv
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Playwright & Node temporary files
+.playwright-cli/
+node_modules/
+
